@@ -10,7 +10,7 @@ namespace D3D {
 	void Shutdown();
 	void BeginScene(const float clear_color[]);
 	void EndScene();
-	bool ResizeRenderTarget(UINT Width, UINT Height, DXGI_FORMAT NewFormat = DXGI_FORMAT_UNKNOWN);
+	bool ResizeRenderTarget(UINT width, UINT height);
 	void GetVideoCardInfo(char* cardName, int& memory);
 	void EnableBlending(bool bEnable = true);
 
