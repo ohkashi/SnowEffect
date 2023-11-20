@@ -4,6 +4,7 @@
 #include "pch.h"
 #include "SnowEffect.h"
 #include "resource.h"
+#include <commdlg.h>
 
 #pragma comment(lib, "dwmapi.lib")
 
@@ -47,13 +48,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInst, _I
 	ImGuiIO& io = ImGui::GetIO(); (void)io;
 	io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;   // Enable Keyboard Controls
 	io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;    // Enable Gamepad Controls
-	CString strFilePath;
-	GetModuleFileName(hInstance, strFilePath.GetBuffer(MAX_PATH), MAX_PATH);
-	strFilePath.ReleaseBuffer();
-	int nPos = strFilePath.ReverseFind('.');
-	strFilePath.Delete(nPos + 1, strFilePath.GetLength() - nPos);
-	nPos = strFilePath.ReverseFind('\\');
-	static CStringA strIniFilename = (LPCSTR)CT2A(strFilePath.Mid(nPos + 1) + _T("ini"));
+	static CStringA strIniFilename = (LPCSTR)CT2A(AppState.strAppName + _T(".ini"));
 	io.IniFilename = (LPCSTR)strIniFilename;
 
 	// Setup Dear ImGui style
@@ -147,7 +142,6 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInst, _I
 		// 2. Show a simple window that we create ourselves. We use a Begin/End pair to create a named window.
 		{
 			auto cam_pos = AppState.camera.GetPosition();
-			static int counter = 0;
 
 			ImGui::Begin(strTitle);                          // Create a window called "Hello, world!" and append into it.
 
@@ -159,11 +153,29 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInst, _I
 			AppState.camera.SetPosition(cam_pos.x, cam_pos.y, cam_pos.z);
 			ImGui::ColorEdit3("clear color", (float*)&AppState.clear_color); // Edit 3 floats representing a color
 
-			if (ImGui::Button("Button"))                            // Buttons return true when clicked (most widgets return true when edited/activated)
-				counter++;
-			ImGui::SameLine();
-			ImGui::Text("counter = %d", counter);
-
+			if (ImGui::Button("Image")) {		// Buttons return true when clicked (most widgets return true when edited/activated)
+				TCHAR szFile[MAX_PATH] = { 0 };
+				OPENFILENAME ofn;
+				ZeroMemory(&ofn, sizeof(ofn));
+				ofn.lStructSize = sizeof(OPENFILENAME);
+				ofn.lpstrFilter = _T("Image files (*.jpg;*.jpeg;*.gif;*.png)\0*.jpg;*.jpeg;*.gif;*.png\0All files(*.*)\0*.*\0\0");
+				ofn.lpstrFile = szFile;
+				ofn.nMaxFile = MAX_PATH;
+				ofn.Flags = OFN_FILEMUSTEXIST;
+				if (::GetOpenFileName(&ofn)) {
+					AppState.SetBackImage(szFile);
+				}
+			}
+			if (!AppState.strBackImgPath.IsEmpty()) {
+				ImGui::SameLine();
+				CStringA strImgFile;
+				int nPos = AppState.strBackImgPath.ReverseFind('\\');
+				if (nPos != -1)
+					strImgFile = AppState.strBackImgPath.Mid(nPos + 1);
+				else
+					strImgFile = AppState.strBackImgPath;
+				ImGui::Text("File: %s", (LPCSTR)strImgFile);
+			}
 			ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / io.Framerate, io.Framerate);
 			ImGui::End();
 		}
@@ -189,10 +201,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInst, _I
 		const float clear_color_with_alpha[4] = { clr.x * clr.w, clr.y * clr.w, clr.z * clr.w, clr.w };
 		//const float clear_color_with_alpha[4] = { 0, 0, 0, 1.0f };
 		D3D::BeginScene(clear_color_with_alpha);
-		// Turn on the alpha blending.
-		D3D::EnableBlending();
 		AppState.Render();
-		D3D::EnableBlending(false);
 		ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
 		D3D::EndScene();
 
@@ -205,6 +214,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInst, _I
 	ImGui_ImplWin32_Shutdown();
 	ImGui::DestroyContext();
 
+	AppState.Cleanup();
 	D3D::Shutdown();
 	::DestroyWindow(hWnd);
 
@@ -320,6 +330,35 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		break;*/
 	case WM_ERASEBKGND:
 		return FALSE;
+	case WM_KEYDOWN:
+		if (wParam == VK_RETURN) {
+			static WINDOWPLACEMENT g_wpPrev = { sizeof(g_wpPrev) };
+			HWND hwnd = AppState.hWnd;
+			DWORD dwStyle = GetWindowLong(hwnd, GWL_STYLE);
+			if (dwStyle & WS_OVERLAPPEDWINDOW) {
+				MONITORINFO mi = { sizeof(mi) };
+				if (GetWindowPlacement(hwnd, &g_wpPrev) &&
+					GetMonitorInfo(MonitorFromWindow(hwnd, MONITOR_DEFAULTTOPRIMARY), &mi))
+				{
+					SetWindowLong(hwnd, GWL_STYLE, dwStyle & ~WS_OVERLAPPEDWINDOW);
+					SetWindowPos(hwnd, HWND_TOP, mi.rcMonitor.left, mi.rcMonitor.top,
+						mi.rcMonitor.right - mi.rcMonitor.left, mi.rcMonitor.bottom - mi.rcMonitor.top,
+						SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+					AppState.fullScreen = true;
+				}
+			} else {
+				SetWindowLong(hwnd, GWL_STYLE, dwStyle | WS_OVERLAPPEDWINDOW);
+				SetWindowPlacement(hwnd, &g_wpPrev);
+				SetWindowPos(hwnd, NULL, 0, 0, 0, 0,
+					SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+				AppState.fullScreen = false;
+			}
+		} else if (wParam == VK_ESCAPE) {
+			PostQuitMessage(0);
+		} else if (wParam == VK_F1) {
+			PostMessage(AppState.hWnd, WM_COMMAND, IDM_ABOUT, 0);
+		}
+		return 0;
 	case WM_COMMAND:
         {
             int wmId = LOWORD(wParam);

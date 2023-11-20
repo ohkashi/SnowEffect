@@ -1,7 +1,11 @@
 #include "pch.h"
 #include "SnowParticle.h"
 #include "resource.h"
+#ifdef USE_DIRECTX_TEX
 #include <DirectXTex.h>
+#else
+#include <DDSTextureLoader.h>
+#endif
 #include <wincodec.h>
 #include <algorithm>
 
@@ -296,12 +300,18 @@ bool SnowParticle::LoadTexture(HMODULE hModule, LPCTSTR resName, LPCTSTR resType
 	// Calculate the size.
 	DWORD imageFileSize = SizeofResource(hModule, imageResHandle);
 
+	HRESULT hr;
+#ifdef USE_DIRECTX_TEX
 	TexMetadata meta;
 	ScratchImage image;
-	HRESULT hr = LoadFromDDSMemory(pImageFile, imageFileSize, DDS_FLAGS_NONE, &meta, image);
+	hr = LoadFromDDSMemory(pImageFile, imageFileSize, DDS_FLAGS_NONE, &meta, image);
 	if (SUCCEEDED(hr)) {
 		hr = CreateShaderResourceView(D3D::Device, image.GetImages(), image.GetImageCount(), meta, &m_pTexture);
 	}
+#else
+	hr = CreateDDSTextureFromMemory(D3D::Device, (const uint8_t*)pImageFile, imageFileSize, NULL, &m_pTexture);
+#endif
+
 	UnlockResource(imageResDataHandle);
 	FreeResource(imageResDataHandle);
 	return SUCCEEDED(hr);

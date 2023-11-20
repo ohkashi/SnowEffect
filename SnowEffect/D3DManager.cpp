@@ -185,6 +185,8 @@ public:
 		if (FAILED(hr))
 			return false;
 
+		D3D::DeviceContext->OMSetRenderTargets(1, &m_renderTargetView, m_depthStencilView);
+
 		// Setup the raster description which will determine how and what polygons will be drawn.
 		rasterDesc.AntialiasedLineEnable = false;
 		rasterDesc.CullMode = D3D11_CULL_BACK;
@@ -279,8 +281,6 @@ public:
 
 		// Clear the depth buffer.
 		D3D::DeviceContext->ClearDepthStencilView(m_depthStencilView, D3D11_CLEAR_DEPTH, 1.0f, 0);
-
-		D3D::DeviceContext->OMSetRenderTargets(1, &m_renderTargetView, m_depthStencilView);
 	}
 
 	void EndScene() {
