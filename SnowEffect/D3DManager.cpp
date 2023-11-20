@@ -17,7 +17,7 @@ XMMATRIX				D3D::OrthoMatrix;
 class D3DManager
 {
 public:
-	D3DManager() : m_vsync_enabled(true), m_videoCardMemory(0), m_videoCardDescription({0}), m_renderTargetView(NULL),
+	D3DManager() : m_vsync_enabled(true), m_videoCardMemory(0), m_videoCardDescription{0}, m_renderTargetView(NULL),
 				   m_scrnNear(0), m_scrnDepth(0), m_depthStencilBuffer(NULL), m_depthStencilState(NULL), m_depthStencilView(NULL),
 				   m_rasterState(NULL), m_alphaEnableBlendingState(NULL), m_alphaDisableBlendingState(NULL)	{}
 	~D3DManager() {}
