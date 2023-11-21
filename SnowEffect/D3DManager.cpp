@@ -161,11 +161,20 @@ public:
 		// Set the feature level to DirectX 11.
 		featureLevel = D3D_FEATURE_LEVEL_11_0;
 
+		D3D_DRIVER_TYPE driverType = D3D_DRIVER_TYPE_HARDWARE;
 		// Create the swap chain, Direct3D device, and Direct3D device context.
-		hr = D3D11CreateDeviceAndSwapChain(NULL, D3D_DRIVER_TYPE_HARDWARE, NULL, 0, &featureLevel, 1,
-			D3D11_SDK_VERSION, &swapChainDesc, &D3D::SwapChain, &D3D::Device, NULL, &D3D::DeviceContext);
-		if (FAILED(hr))
-			return false;
+		while (1) {
+			hr = D3D11CreateDeviceAndSwapChain(NULL, driverType, NULL, 0, &featureLevel, 1, D3D11_SDK_VERSION,
+				&swapChainDesc, &D3D::SwapChain, &D3D::Device, NULL, &D3D::DeviceContext);
+			if (FAILED(hr)) {
+				if (hr == DXGI_ERROR_UNSUPPORTED && driverType == D3D_DRIVER_TYPE_HARDWARE) {
+					driverType = D3D_DRIVER_TYPE_REFERENCE;
+					continue;
+				}
+				return false;
+			}
+			break;
+		}
 
 		// Get the pointer to the back buffer.
 		hr = D3D::SwapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), (LPVOID*)&backBufferPtr);

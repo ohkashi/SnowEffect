@@ -13,77 +13,70 @@ SnowShader::~SnowShader()
 
 bool SnowShader::Init(HWND hWnd)
 {
-	const char vertex_shader[] =
-	"cbuffer MatrixBuffer {\n\
-		matrix worldMatrix;\n\
-		matrix viewMatrix;\n\
-		matrix projectionMatrix;\n\
-	};\n\
-	\n\
-	struct VertexInputType {\n\
-		float4 position : POSITION;\n\
-		float2 tex : TEXCOORD0;\n"
+	const char* vertex_shader =
+		"cbuffer MatrixBuffer {\n\
+			matrix worldMatrix;\n\
+			matrix viewMatrix;\n\
+			matrix projectionMatrix;\n\
+		};\n\
+		struct VertexInputType {\n\
+			float4 position : POSITION;\n\
+			float2 tex : TEXCOORD0;\n"
 #ifdef _INCLUDE_VERTEX_COLOR
-	"	float4 color : COLOR;\n"
+		"	float4 color : COLOR;\n"
 #endif
-	"};\n\
-	\n\
-	struct PixelInputType {\n\
-		float4 position : SV_POSITION;\n\
-		float2 tex : TEXCOORD0;\n"
+		"};\n\
+		struct PixelInputType {\n\
+			float4 position : SV_POSITION;\n\
+			float2 tex : TEXCOORD0;\n"
 #ifdef _INCLUDE_VERTEX_COLOR
-	"	float4 color : COLOR;\n"
+		"	float4 color : COLOR;\n"
 #endif
-	"};\n\
-	\n\
-	PixelInputType ParticleVertexShader(VertexInputType input) {\n\
-		PixelInputType output;\n\
-		// Change the position vector to be 4 units for proper matrix calculations.\n\
-		input.position.w = 1.0f;\n\
-		// Calculate the position of the vertex against the world, view, and projection matrices.\n\
-		output.position = mul(input.position, worldMatrix);\n\
-		output.position = mul(output.position, viewMatrix);\n\
-		output.position = mul(output.position, projectionMatrix);\n\
-		// Store the texture coordinates for the pixel shader.\n\
-		output.tex = input.tex;\n"
+		"};\n\
+		PixelInputType ParticleVertexShader(VertexInputType input) {\n\
+			PixelInputType output;\n\
+			// Change the position vector to be 4 units for proper matrix calculations.\n\
+			input.position.w = 1.0f;\n\
+			// Calculate the position of the vertex against the world, view, and projection matrices.\n\
+			output.position = mul(input.position, worldMatrix);\n\
+			output.position = mul(output.position, viewMatrix);\n\
+			output.position = mul(output.position, projectionMatrix);\n\
+			// Store the texture coordinates for the pixel shader.\n\
+			output.tex = input.tex;\n"
 #ifdef _INCLUDE_VERTEX_COLOR
-	"	// Store the particle color for the pixel shader.\n\
-		output.color = input.color;\n"
+		"	// Store the particle color for the pixel shader.\n\
+			output.color = input.color;\n"
 #endif
-	"	return output;\n\
-	}\n";
+		"	return output;\n\
+		}\n";
 
-	const char pixel_shader[] =
-	"Texture2D shaderTexture;\n\
-	SamplerState SampleType;\n\
-	\n\
-	struct PixelInputType {\n\
-		float4 position : SV_POSITION;\n\
-		float2 tex : TEXCOORD0;\n"
+	const char* pixel_shader =
+		"Texture2D shaderTexture;\n\
+		SamplerState SampleType;\n\n\
+		\
+		struct PixelInputType {\n\
+			float4 position : SV_POSITION;\n\
+			float2 tex : TEXCOORD0;\n"
 #ifdef _INCLUDE_VERTEX_COLOR
-	"	float4 color : COLOR;\n"
+		"	float4 color : COLOR;\n"
 #endif
-	"};\n\
-	\n\
-	float4 ParticlePixelShader(PixelInputType input) : SV_TARGET {\n"
+		"};\n\
+		float4 ParticlePixelShader(PixelInputType input) : SV_TARGET {\n"
 #ifdef _INCLUDE_VERTEX_COLOR
-	"	float4 textureColor;\n\
-		float4 finalColor;\n\
-		// Sample the pixel color from the texture using the sampler at this texture coordinate location.\n\
-		textureColor = shaderTexture.Sample(SampleType, input.tex);\n\
-		// Combine the texture color and the particle color to get the final color result.\n\
-		finalColor = textureColor * input.color;\n\
-		return finalColor;\n"
+		"	float4 textureColor;\n\
+			float4 finalColor;\n\
+			// Sample the pixel color from the texture using the sampler at this texture coordinate location.\n\
+			textureColor = shaderTexture.Sample(SampleType, input.tex);\n\
+			// Combine the texture color and the particle color to get the final color result.\n\
+			finalColor = textureColor * input.color;\n\
+			return finalColor;\n"
 #else
-	"	return shaderTexture.Sample(SampleType, input.tex);\n"
+		"	return shaderTexture.Sample(SampleType, input.tex);\n"
 #endif
-	"}\n";
-
-	size_t vs_len = sizeof(vertex_shader) - 1;
-	size_t ps_len = sizeof(pixel_shader) - 1;
+		"}\n";
 
 	// Initialize the vertex and pixel shaders.
-	return InitShader(hWnd, vertex_shader, vs_len, pixel_shader, ps_len);
+	return InitShader(hWnd, vertex_shader, strlen(vertex_shader), pixel_shader, strlen(pixel_shader));
 }
 
 void SnowShader::Shutdown()
@@ -98,7 +91,7 @@ bool SnowShader::Render(int indexCount, XMMATRIX worldMatrix, XMMATRIX viewMatri
 						XMMATRIX projectionMatrix, ID3D11ShaderResourceView* texture)
 {
 	// Set the shader parameters that it will use for rendering.
-	if (!SetShaderParameters(worldMatrix, viewMatrix, projectionMatrix, texture))
+	if (!m_matrixBuffer || !SetShaderParameters(worldMatrix, viewMatrix, projectionMatrix, texture))
 		return false;
 
 	// Now render the prepared buffers with the shader.

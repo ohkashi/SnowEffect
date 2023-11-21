@@ -19,6 +19,14 @@ HWND InitInstance(HINSTANCE hInstance, LPCWSTR lpszTitle, LPCWSTR lpszWindowClas
 LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
 INT_PTR CALLBACK About(HWND, UINT, WPARAM, LPARAM);
 
+static CStringA Utf8(LPCWSTR lpszUnicode)
+{
+	char szUtf8[MAX_PATH] = { 0, };
+	int wstr_len = min(sizeof(szUtf8) - 1, (int)wcslen(lpszUnicode));
+	int nLen = WideCharToMultiByte(CP_UTF8, 0, lpszUnicode, wstr_len, NULL, 0, NULL, NULL);
+	WideCharToMultiByte(CP_UTF8, 0, lpszUnicode, wstr_len, szUtf8, nLen, NULL, NULL);
+	return szUtf8;
+}
 
 int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInst, _In_ LPWSTR lpCmdLine, _In_ int nCmdShow)
 {
@@ -48,7 +56,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInst, _I
 	ImGuiIO& io = ImGui::GetIO(); (void)io;
 	io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;   // Enable Keyboard Controls
 	io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;    // Enable Gamepad Controls
-	static CStringA strIniFilename = (LPCSTR)CT2A(AppState.strAppName + _T(".ini"));
+	static CStringA strIniFilename = (LPCSTR)Utf8(AppState.strAppName + _T(".ini"));
 	io.IniFilename = (LPCSTR)strIniFilename;
 
 	// Setup Dear ImGui style
@@ -56,6 +64,15 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInst, _I
 		ImGui::StyleColorsDark();
 	else
 		ImGui::StyleColorsClassic();
+
+	CString strIniPath = AppState.strAppDir + AppState.strAppName + _T(".ini");
+	CString strBackImgPath;
+	GetPrivateProfileString(_T("Background"), _T("ImagePath"), NULL, strBackImgPath.GetBuffer(MAX_PATH), MAX_PATH, strIniPath);
+	strBackImgPath.ReleaseBuffer();
+	strBackImgPath.Trim();
+	if (strBackImgPath.IsEmpty())
+		strBackImgPath = AppState.strAppDir + AppState.strAppName + _T(".jpg");
+	AppState.SetBackImage(strBackImgPath);
 
 	auto _ColorFromBytes = [](BYTE r, BYTE g, BYTE b) {
 		return ImVec4((float)r / 255.0f, (float)g / 255.0f, (float)b / 255.0f, 1.0f); };
@@ -135,64 +152,73 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInst, _I
 		ImGui_ImplWin32_NewFrame();
 		ImGui::NewFrame();
 
-		// 1. Show the big demo window (Most of the sample code is in ImGui::ShowDemoWindow()! You can browse its code to learn more about Dear ImGui!).
-		if (AppState.show_demo_window)
-			ImGui::ShowDemoWindow(&AppState.show_demo_window);
+		if (AppState.show_imgui) {
+			// 1. Show the big demo window (Most of the sample code is in ImGui::ShowDemoWindow()! You can browse its code to learn more about Dear ImGui!).
+			if (AppState.show_demo_window)
+				ImGui::ShowDemoWindow(&AppState.show_demo_window);
 
-		// 2. Show a simple window that we create ourselves. We use a Begin/End pair to create a named window.
-		{
-			auto cam_pos = AppState.camera.GetPosition();
+			bool restore_cam_rot = AppState.show_another_window;
+			// 2. Show a simple window that we create ourselves. We use a Begin/End pair to create a named window.
+			{
+				auto cam_pos = AppState.camera.GetPosition();
 
-			ImGui::Begin(strTitle);                          // Create a window called "Hello, world!" and append into it.
+				ImGui::Begin(strTitle);                          // Create a window called "Hello, world!" and append into it.
 
-			ImGui::Text("This is some useful text.");               // Display some text (you can use a format strings too)
-			ImGui::Checkbox("Demo Window", &AppState.show_demo_window);	// Edit bools storing our window open/close state
-			ImGui::Checkbox("Another Window", &AppState.show_another_window);
+				ImGui::Text("This is some useful text.");               // Display some text (you can use a format strings too)
+				ImGui::Checkbox("Demo Window", &AppState.show_demo_window);	// Edit bools storing our window open/close state
+				ImGui::Checkbox("Another Window", &AppState.show_another_window);
 
-			ImGui::SliderFloat("Zoom", &cam_pos.z, -15.0f, 0.0f);
-			AppState.camera.SetPosition(cam_pos.x, cam_pos.y, cam_pos.z);
-			ImGui::ColorEdit3("clear color", (float*)&AppState.clear_color); // Edit 3 floats representing a color
+				ImGui::SliderFloat("Zoom", &cam_pos.z, -15.0f, 0.0f);
+				AppState.camera.SetPosition(cam_pos.x, cam_pos.y, cam_pos.z);
+				ImGui::ColorEdit3("clear color", (float*)&AppState.clear_color); // Edit 3 floats representing a color
 
-			if (ImGui::Button("Image")) {		// Buttons return true when clicked (most widgets return true when edited/activated)
-				TCHAR szFile[MAX_PATH] = { 0 };
-				OPENFILENAME ofn;
-				ZeroMemory(&ofn, sizeof(ofn));
-				ofn.lStructSize = sizeof(OPENFILENAME);
-				ofn.lpstrFilter = _T("Image files (*.jpg;*.jpeg;*.gif;*.png)\0*.jpg;*.jpeg;*.gif;*.png\0All files(*.*)\0*.*\0\0");
-				ofn.lpstrFile = szFile;
-				ofn.nMaxFile = MAX_PATH;
-				ofn.Flags = OFN_FILEMUSTEXIST;
-				if (::GetOpenFileName(&ofn)) {
-					AppState.SetBackImage(szFile);
+				if (ImGui::Button("Image")) {		// Buttons return true when clicked (most widgets return true when edited/activated)
+					TCHAR szFile[MAX_PATH] = { 0 };
+					OPENFILENAME ofn;
+					ZeroMemory(&ofn, sizeof(ofn));
+					ofn.lStructSize = sizeof(OPENFILENAME);
+					ofn.lpstrFilter = _T("Image files (*.jpg;*.jpeg;*.gif;*.png)\0*.jpg;*.jpeg;*.gif;*.png\0All files(*.*)\0*.*\0\0");
+					ofn.lpstrFile = szFile;
+					ofn.nMaxFile = MAX_PATH;
+					ofn.Flags = OFN_FILEMUSTEXIST;
+					if (::GetOpenFileName(&ofn)) {
+						AppState.SetBackImage(szFile);
+					}
 				}
+				if (!AppState.strBackImgPath.IsEmpty()) {
+					ImGui::SameLine();
+					CStringW strImgFile;
+					int nPos = AppState.strBackImgPath.ReverseFind('\\');
+					if (nPos != -1)
+						strImgFile = AppState.strBackImgPath.Mid(nPos + 1);
+					else
+						strImgFile = AppState.strBackImgPath;
+					ImGui::Text((LPCSTR)Utf8(strImgFile));
+				}
+				ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / io.Framerate, io.Framerate);
+				ImGui::End();
 			}
-			if (!AppState.strBackImgPath.IsEmpty()) {
-				ImGui::SameLine();
-				CStringA strImgFile;
-				int nPos = AppState.strBackImgPath.ReverseFind('\\');
-				if (nPos != -1)
-					strImgFile = AppState.strBackImgPath.Mid(nPos + 1);
-				else
-					strImgFile = AppState.strBackImgPath;
-				ImGui::Text("File: %s", (LPCSTR)strImgFile);
-			}
-			ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / io.Framerate, io.Framerate);
-			ImGui::End();
-		}
 
-		// 3. Show another simple window.
-		if (AppState.show_another_window)
-		{
-			ImGui::Begin("Another Window", &AppState.show_another_window);   // Pass a pointer to our bool variable (the window will have a closing button that will clear the bool when clicked)
-			ImGui::Text("Hello from another window!");
-			if (ImGui::Button("Close Me"))
-				AppState.show_another_window = false;
-			ImVec2 vMin = ImGui::GetWindowContentRegionMin();
-			ImVec2 vMax = ImGui::GetWindowContentRegionMax();
-			float x = (ImGui::GetWindowPos().x - vMin.x) / AppState.wndSize.cx;
-			float y = (ImGui::GetWindowPos().y - vMin.y) / AppState.wndSize.cy;
-			ImGui::End();
-			AppState.camera.SetRotation(y * -90.0f + 45.0f, 0.0f, x * -20.0f + 10.0f);
+			// 3. Show another simple window.
+			if (AppState.show_another_window)
+			{
+				ImGui::Begin("Another Window", &AppState.show_another_window);   // Pass a pointer to our bool variable (the window will have a closing button that will clear the bool when clicked)
+				ImGui::Text("Hello from another window!");
+				if (ImGui::Button("Close Me")) {
+					AppState.show_another_window = false;
+				} else {
+					ImVec2 vMin = ImGui::GetWindowContentRegionMin();
+					ImVec2 vMax = ImGui::GetWindowContentRegionMax();
+					float x = (ImGui::GetWindowPos().x - vMin.x) / AppState.wndSize.cx;
+					float y = (ImGui::GetWindowPos().y - vMin.y) / AppState.wndSize.cy;
+					AppState.camera.SetRotation(y * 90.0f - 45.0f, 0.0f, x * -20.0f + 10.0f);
+				}
+				ImGui::End();
+			}
+			if (restore_cam_rot && !AppState.show_another_window) {
+				auto rot = AppState.camera.GetRotation();
+				AppState.camera.SetRotation(-rot.x, 0.0f, -rot.z);
+			}
 		}
 
 		// Rendering
@@ -205,14 +231,15 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInst, _I
 		ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
 		D3D::EndScene();
 
-		if (io.Framerate > 60.0f)
-			Sleep(10);
+		DWORD dwDelay = max(1, 1000 / 50 - (int)(io.DeltaTime * 1000.0f));
+		Sleep(dwDelay);
 	}
 
 	// Cleanup
 	ImGui_ImplDX11_Shutdown();
 	ImGui_ImplWin32_Shutdown();
 	ImGui::DestroyContext();
+	WritePrivateProfileString(_T("Background"), _T("ImagePath"), AppState.strBackImgPath, strIniPath);
 
 	AppState.Cleanup();
 	D3D::Shutdown();
@@ -357,6 +384,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			PostQuitMessage(0);
 		} else if (wParam == VK_F1) {
 			PostMessage(AppState.hWnd, WM_COMMAND, IDM_ABOUT, 0);
+		} else if (wParam == VK_F2) {
+			AppState.show_imgui = !AppState.show_imgui;
 		}
 		return 0;
 	case WM_COMMAND:

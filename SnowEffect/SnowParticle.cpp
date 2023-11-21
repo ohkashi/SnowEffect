@@ -40,6 +40,10 @@ bool SnowParticle::Init(HWND hWnd, const XMFLOAT3& position, int numMax, float w
 	if (m_vtParticles.size() != m_maxParticles)
 		return false;
 
+	for (auto& sf : m_vtParticles)
+		sf.Init(m_snowSize, m_position, m_size.x, snow::GetRandom(m_size.y), m_size.z);
+	m_particleCount = m_maxParticles;
+
 	if (!LoadTexture(NULL, MAKEINTRESOURCE(IDR_DDS_PARTICLE))) {
 		MessageBox(hWnd, _T("LoadTexture() failed!"), _T("SnowParticle"), MB_ICONERROR | MB_OK);
 		m_vtParticles.clear();

@@ -9,7 +9,8 @@
 
 struct app_state {
 	app_state() : hInstance(NULL), hWnd(NULL), wndSize({1024, 1024}), isDarkMode(false), fullScreen(false),
-		show_demo_window(false), show_another_window(false), iSnowMax(3000), spriteBatch(NULL), backSize{0}, backTexture(NULL)
+		show_imgui(true), show_demo_window(false), show_another_window(false), iSnowMax(3000),
+		spriteBatch(NULL), backSize{0}, backTexture(NULL)
 	{
 		isDarkMode = !IsLightTheme();
 		clear_color = isDarkMode ? ImVec4(0.15f, 0.15f, 0.15f, 1.0f) : ImVec4(0.45f, 0.55f, 0.60f, 1.0f);
@@ -27,7 +28,6 @@ struct app_state {
 		strAppDir.Delete(nPos + 1, strAppDir.GetLength() - nPos);
 		nPos = strAppName.ReverseFind('.');
 		strAppName.Delete(nPos, strAppName.GetLength() - nPos + 1);
-		strBackImgPath = strAppDir + strAppName + _T(".jpg");
 
 		SetTitleBarDarkMode(this->hWnd, isDarkMode);
 		/*if (isDarkMode) {
@@ -40,7 +40,7 @@ struct app_state {
 			ATLTRACE("SnowParticle::Init() failed!\n");
 			return false;
 		}
-		camera.SetPosition(0.0f, 0.0f, -particle.GetViewSize().z - 1.5f);
+		camera.SetPosition(0.0f, 0.0f, -particle.GetViewSize().z - 2.5f);
 		//camera.SetRotation(0.0f, 1.0f, 1.0f);
 
 		this->spriteBatch = new SpriteBatch(D3D::DeviceContext);
@@ -126,6 +126,7 @@ struct app_state {
 	CString		strTitle;
 	CString		strAppDir;
 	CString		strAppName;
+	bool		show_imgui;
 	bool		show_demo_window;
 	bool		show_another_window;
 	int			iSnowMax;
