@@ -16,6 +16,7 @@ static UINT		g_ResizeWidth = 0, g_ResizeHeight = 0;
 // Forward declarations of functions included in this code module:
 ATOM MyRegisterClass(HINSTANCE hInstance, LPCWSTR lpszWindowClass);
 HWND InitInstance(HINSTANCE hInstance, LPCWSTR lpszTitle, LPCWSTR lpszWindowClass);
+void ToggleFullScreen(HWND hWnd);
 LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
 INT_PTR CALLBACK About(HWND, UINT, WPARAM, LPARAM);
 
@@ -56,7 +57,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInst, _I
 	ImGuiIO& io = ImGui::GetIO(); (void)io;
 	io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;   // Enable Keyboard Controls
 	io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;    // Enable Gamepad Controls
-	static CStringA strIniFilename = (LPCSTR)Utf8(AppState.strAppName + _T(".ini"));
+	int nPos = AppState.strIniFilePath.ReverseFind('\\');
+	static CStringA strIniFilename = (LPCSTR)Utf8(AppState.strIniFilePath.Mid(nPos + 1));
 	io.IniFilename = (LPCSTR)strIniFilename;
 	SetCurrentDirectory(AppState.strAppDir);
 
@@ -66,9 +68,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInst, _I
 	else
 		ImGui::StyleColorsClassic();
 
-	CString strIniPath = AppState.strAppDir + AppState.strAppName + _T(".ini");
-	CString strBackImgPath;
-	GetPrivateProfileString(_T("UserSettings"), _T("ImagePath"), NULL, strBackImgPath.GetBuffer(MAX_PATH), MAX_PATH, strIniPath);
+	CString strBackImgPath = AppState.ReadIniString(_T("UserSettings"), _T("ImagePath"));
 	strBackImgPath.ReleaseBuffer();
 	strBackImgPath.Trim();
 	if (strBackImgPath.IsEmpty())
@@ -123,6 +123,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInst, _I
 	CStringA strTitle = (LPCSTR)CT2A(AppState.strTitle);
 	strTitle += " Options";
 	HACCEL hAccelTable = LoadAccelerators(hInstance, MAKEINTRESOURCE(IDC_SNOWEFFECT));
+	if (!AppState.isScrnSaver)
+		SetThreadExecutionState(ES_DISPLAY_REQUIRED | ES_SYSTEM_REQUIRED | ES_CONTINUOUS);
 
 	// Main loop
 	bool done = false;
@@ -228,19 +230,22 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInst, _I
 		const float clear_color_with_alpha[4] = { clr.x * clr.w, clr.y * clr.w, clr.z * clr.w, clr.w };
 		//const float clear_color_with_alpha[4] = { 0, 0, 0, 1.0f };
 		D3D::BeginScene(clear_color_with_alpha);
-		AppState.Render();
+		AppState.Render(io.DeltaTime * 7.0f);
 		ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
 		D3D::EndScene();
 
-		DWORD dwDelay = max(1, 1000 / 50 - (int)(io.DeltaTime * 1000.0f));
-		Sleep(dwDelay);
+		const int limitFrameRate = 1000 / 60;
+		int deltaTime = (int)(io.DeltaTime * 1000.0f);
+		Sleep(max(1, limitFrameRate - deltaTime));
 	}
+
+	if (!AppState.isScrnSaver)
+		SetThreadExecutionState(ES_CONTINUOUS);
 
 	// Cleanup
 	ImGui_ImplDX11_Shutdown();
 	ImGui_ImplWin32_Shutdown();
 	ImGui::DestroyContext();
-	WritePrivateProfileString(_T("UserSettings"), _T("ImagePath"), AppState.strBackImgPath, strIniPath);
 
 	AppState.Cleanup();
 	D3D::Shutdown();
@@ -315,9 +320,35 @@ HWND InitInstance(HINSTANCE hInstance, LPCWSTR lpszTitle, LPCWSTR lpszWindowClas
 	}
 
 	AppState.Init(hWnd);
+	if (AppState.fullScreen)
+		ToggleFullScreen(hWnd);
 
 	return hWnd;
 }
+
+void ToggleFullScreen(HWND hWnd) {
+	static WINDOWPLACEMENT g_wpPrev = { sizeof(g_wpPrev) };
+	DWORD dwStyle = GetWindowLong(hWnd, GWL_STYLE);
+	if (dwStyle & WS_OVERLAPPEDWINDOW) {
+		MONITORINFO mi = { sizeof(mi) };
+		if (GetWindowPlacement(hWnd, &g_wpPrev) &&
+			GetMonitorInfo(MonitorFromWindow(hWnd, MONITOR_DEFAULTTOPRIMARY), &mi))
+		{
+			SetWindowLong(hWnd, GWL_STYLE, dwStyle & ~WS_OVERLAPPEDWINDOW);
+			SetWindowPos(hWnd, HWND_TOP, mi.rcMonitor.left, mi.rcMonitor.top,
+				mi.rcMonitor.right - mi.rcMonitor.left, mi.rcMonitor.bottom - mi.rcMonitor.top,
+				SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+			AppState.fullScreen = true;
+		}
+	} else {
+		SetWindowLong(hWnd, GWL_STYLE, dwStyle | WS_OVERLAPPEDWINDOW);
+		SetWindowPlacement(hWnd, &g_wpPrev);
+		SetWindowPos(hWnd, NULL, 0, 0, 0, 0,
+			SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+		AppState.fullScreen = false;
+	}
+}
+
 
 // Forward declare message handler from imgui_impl_win32.cpp
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -360,27 +391,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		return FALSE;
 	case WM_KEYDOWN:
 		if (wParam == VK_RETURN) {
-			static WINDOWPLACEMENT g_wpPrev = { sizeof(g_wpPrev) };
-			HWND hwnd = AppState.hWnd;
-			DWORD dwStyle = GetWindowLong(hwnd, GWL_STYLE);
-			if (dwStyle & WS_OVERLAPPEDWINDOW) {
-				MONITORINFO mi = { sizeof(mi) };
-				if (GetWindowPlacement(hwnd, &g_wpPrev) &&
-					GetMonitorInfo(MonitorFromWindow(hwnd, MONITOR_DEFAULTTOPRIMARY), &mi))
-				{
-					SetWindowLong(hwnd, GWL_STYLE, dwStyle & ~WS_OVERLAPPEDWINDOW);
-					SetWindowPos(hwnd, HWND_TOP, mi.rcMonitor.left, mi.rcMonitor.top,
-						mi.rcMonitor.right - mi.rcMonitor.left, mi.rcMonitor.bottom - mi.rcMonitor.top,
-						SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
-					AppState.fullScreen = true;
-				}
-			} else {
-				SetWindowLong(hwnd, GWL_STYLE, dwStyle | WS_OVERLAPPEDWINDOW);
-				SetWindowPlacement(hwnd, &g_wpPrev);
-				SetWindowPos(hwnd, NULL, 0, 0, 0, 0,
-					SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
-				AppState.fullScreen = false;
-			}
+			ToggleFullScreen(hWnd);
 		} else if (wParam == VK_ESCAPE) {
 			PostQuitMessage(0);
 		} else if (wParam == VK_F1) {
@@ -420,14 +431,39 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 INT_PTR CALLBACK About(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
 {
     UNREFERENCED_PARAMETER(lParam);
-    switch (message)
-    {
+
+    switch (message) {
     case WM_INITDIALOG:
+		{
+			HWND hwndOwner;
+			RECT rc, rcDlg, rcOwner;
+
+			// Get the owner window and dialog box rectangles. 
+			if ((hwndOwner = GetParent(hDlg)) == NULL) 
+				hwndOwner = GetDesktopWindow(); 
+
+			GetWindowRect(hwndOwner, &rcOwner); 
+			GetWindowRect(hDlg, &rcDlg); 
+			CopyRect(&rc, &rcOwner); 
+
+			// Offset the owner and dialog box rectangles so that right and bottom 
+			// values represent the width and height, and then offset the owner again 
+			// to discard space taken up by the dialog box. 
+
+			OffsetRect(&rcDlg, -rcDlg.left, -rcDlg.top); 
+			OffsetRect(&rc, -rc.left, -rc.top); 
+			OffsetRect(&rc, -rcDlg.right, -rcDlg.bottom); 
+
+			// The new position is the sum of half the remaining space and the owner's 
+			// original position. 
+
+			SetWindowPos(hDlg, HWND_TOP,
+				rcOwner.left + (rc.right / 2), rcOwner.top + (rc.bottom / 2), 0, 0, SWP_NOSIZE); 
+		}
         return (INT_PTR)TRUE;
 
     case WM_COMMAND:
-        if (LOWORD(wParam) == IDOK || LOWORD(wParam) == IDCANCEL)
-        {
+        if (LOWORD(wParam) == IDOK || LOWORD(wParam) == IDCANCEL) {
             EndDialog(hDlg, LOWORD(wParam));
             return (INT_PTR)TRUE;
         }

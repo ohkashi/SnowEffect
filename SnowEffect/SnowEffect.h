@@ -8,9 +8,9 @@
 
 
 struct app_state {
-	app_state() : hInstance(NULL), hWnd(NULL), wndSize({1024, 1024}), isDarkMode(false), fullScreen(false),
-		show_imgui(true), show_demo_window(false), show_another_window(false), iSnowMax(3000),
-		spriteBatch(NULL), backSize{0}, backTexture(NULL)
+	app_state() : hInstance(NULL), hWnd(NULL), wndSize({1024, 1024}), isDarkMode(false), isScrnSaver(false),
+		fullScreen(false), show_imgui(true), show_demo_window(false), show_another_window(false),
+		iSnowMax(3000), spriteBatch(NULL), backSize{0}, backTexture(NULL)
 	{
 		isDarkMode = !IsLightTheme();
 		clear_color = isDarkMode ? ImVec4(0.15f, 0.15f, 0.15f, 1.0f) : ImVec4(0.45f, 0.55f, 0.60f, 1.0f);
@@ -27,7 +27,13 @@ struct app_state {
 		strAppName = strAppDir.Mid(nPos + 1);
 		strAppDir.Delete(nPos + 1, strAppDir.GetLength() - nPos);
 		nPos = strAppName.ReverseFind('.');
+		CString str = strAppName.Mid(nPos + 1);
+		isScrnSaver = (str.CompareNoCase(_T("scr")) == 0);
 		strAppName.Delete(nPos, strAppName.GetLength() - nPos + 1);
+		strIniFilePath = strAppDir + strAppName + _T(".ini");
+		show_imgui = ReadIniInt(_T("UserSettings"), _T("ShowImGui"), TRUE);
+		fullScreen = ReadIniInt(_T("UserSettings"), _T("FullScreen"), FALSE);
+		iSnowMax = ReadIniInt(_T("UserSettings"), _T("ParticleMax"), iSnowMax);
 
 		SetTitleBarDarkMode(this->hWnd, isDarkMode);
 		/*if (isDarkMode) {
@@ -40,7 +46,12 @@ struct app_state {
 			ATLTRACE("SnowParticle::Init() failed!\n");
 			return false;
 		}
-		camera.SetPosition(0.0f, 0.0f, -particle.GetViewSize().z - 2.5f);
+
+		float zoom = -particle.GetViewSize().z - 2.5f;
+		str = ReadIniString(_T("UserSettings"), _T("Zoom"), 10);
+		if (!str.IsEmpty())
+			zoom = (float)_ttof(str);
+		camera.SetPosition(0.0f, 0.0f, zoom);
 		//camera.SetRotation(0.0f, 1.0f, 1.0f);
 
 		this->spriteBatch = new SpriteBatch(D3D::DeviceContext);
@@ -70,8 +81,39 @@ struct app_state {
 	}
 
 	void Cleanup() {
+		WriteIniInt(_T("UserSettings"), _T("ShowImGui"), show_imgui);
+		WriteIniInt(_T("UserSettings"), _T("FullScreen"), fullScreen);
+		WriteIniInt(_T("UserSettings"), _T("ParticleMax"), iSnowMax);
+		CString str;
+		str.Format(_T("%.2f"), camera.GetPosition().z);
+		WriteIniString(_T("UserSettings"), _T("Zoom"), str);
+		WriteIniString(_T("UserSettings"), _T("ImagePath"), strBackImgPath);
+
 		SafeDelete(spriteBatch);
 		SafeRelease(&backTexture);
+	}
+
+	CString ReadIniString(LPCTSTR lpszSection, LPCTSTR lpszKeyName, DWORD nSize = MAX_PATH) {
+		CString strValue;
+		GetPrivateProfileString(lpszSection, lpszKeyName, NULL, strValue.GetBuffer(nSize), nSize, strIniFilePath);
+		strValue.ReleaseBuffer();
+		return strValue;
+	}
+	int ReadIniInt(LPCTSTR lpszSection, LPCTSTR lpszKeyName, int nDefault = 0) {
+		CString strValue;
+		GetPrivateProfileString(lpszSection, lpszKeyName, NULL, strValue.GetBuffer(16), 16, strIniFilePath);
+		strValue.ReleaseBuffer();
+		if (strValue.IsEmpty())
+			return nDefault;
+		return _ttoi(strValue);
+	}
+	bool WriteIniString(LPCTSTR lpszSection, LPCTSTR lpszKeyName, LPCTSTR lpszString) {
+		return WritePrivateProfileString(lpszSection, lpszKeyName, lpszString, strIniFilePath);
+	}
+	bool WriteIniInt(LPCTSTR lpszSection, LPCTSTR lpszKeyName, int nValue) {
+		CString strValue;
+		strValue.Format(_T("%d"), nValue);
+		return WritePrivateProfileString(lpszSection, lpszKeyName, strValue, strIniFilePath);
 	}
 
 	bool IsLightTheme() {
@@ -108,12 +150,13 @@ struct app_state {
 			spriteBatch->Draw(backTexture, destRect);
 			spriteBatch->End();
 		}
+		particle.Update(scalar);
+
 		// Turn on the alpha blending.
 		D3D::EnableBlending();
 		particle.Render(wndSize.cx, wndSize.cy);
 		XMMATRIX projectionMatrix = D3D::ProjectionMatrix;
 		particle.RenderShader(D3D::WorldMatrix, camera.GetViewMatrix(), projectionMatrix);
-		particle.Update(scalar);
 		D3D::EnableBlending(false);
 	}
 
@@ -122,11 +165,13 @@ struct app_state {
 	HWND		hWnd;
 	SIZE		wndSize;
 	bool		isDarkMode;
+	bool		isScrnSaver;
 	bool		fullScreen;
 	ImVec4		clear_color;
 	CString		strTitle;
 	CString		strAppDir;
 	CString		strAppName;
+	CString		strIniFilePath;
 	bool		show_imgui;
 	bool		show_demo_window;
 	bool		show_another_window;

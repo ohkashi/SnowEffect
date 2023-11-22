@@ -252,7 +252,7 @@ void SnowParticle::Update(float scalar) noexcept
 		else
 			sf = m_vtParticles[--m_particleCount];
 	}
-	std::sort(m_vtParticles.begin(), m_vtParticles.begin() + m_particleCount);
+	//std::sort(m_vtParticles.begin(), m_vtParticles.begin() + m_particleCount);
 	m_totalTime += scalar;
 	numParticles = SnowFlake::SnowUpdateAmount * (int)m_totalTime;
 	m_totalTime -= 1 / SnowFlake::SnowUpdateAmount * numParticles;
