@@ -58,6 +58,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInst, _I
 	io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;    // Enable Gamepad Controls
 	static CStringA strIniFilename = (LPCSTR)Utf8(AppState.strAppName + _T(".ini"));
 	io.IniFilename = (LPCSTR)strIniFilename;
+	SetCurrentDirectory(AppState.strAppDir);
 
 	// Setup Dear ImGui style
 	if (AppState.isDarkMode)
@@ -67,7 +68,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInst, _I
 
 	CString strIniPath = AppState.strAppDir + AppState.strAppName + _T(".ini");
 	CString strBackImgPath;
-	GetPrivateProfileString(_T("Background"), _T("ImagePath"), NULL, strBackImgPath.GetBuffer(MAX_PATH), MAX_PATH, strIniPath);
+	GetPrivateProfileString(_T("UserSettings"), _T("ImagePath"), NULL, strBackImgPath.GetBuffer(MAX_PATH), MAX_PATH, strIniPath);
 	strBackImgPath.ReleaseBuffer();
 	strBackImgPath.Trim();
 	if (strBackImgPath.IsEmpty())
@@ -239,7 +240,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInst, _I
 	ImGui_ImplDX11_Shutdown();
 	ImGui_ImplWin32_Shutdown();
 	ImGui::DestroyContext();
-	WritePrivateProfileString(_T("Background"), _T("ImagePath"), AppState.strBackImgPath, strIniPath);
+	WritePrivateProfileString(_T("UserSettings"), _T("ImagePath"), AppState.strBackImgPath, strIniPath);
 
 	AppState.Cleanup();
 	D3D::Shutdown();

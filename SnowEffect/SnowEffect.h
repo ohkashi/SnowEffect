@@ -51,7 +51,8 @@ struct app_state {
 
 	bool SetBackImage(LPCTSTR lpszImgPath) {
 		SafeRelease(&backTexture);
-		HRESULT hr = CreateWICTextureFromFile(D3D::Device, lpszImgPath, nullptr, &backTexture);
+		HRESULT hr = CreateWICTextureFromFileEx(D3D::Device, lpszImgPath, 0, D3D11_USAGE_DEFAULT,
+			D3D11_BIND_SHADER_RESOURCE, 0, 0, WIC_LOADER_IGNORE_SRGB, nullptr, &backTexture);
 		if (SUCCEEDED(hr)) {
 			ID3D11Resource* pResource = nullptr;
 			backTexture->GetResource(&pResource);
