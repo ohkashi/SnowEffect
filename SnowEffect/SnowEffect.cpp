@@ -34,6 +34,11 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInst, _I
     UNREFERENCED_PARAMETER(hPrevInst);
     UNREFERENCED_PARAMETER(lpCmdLine);
 
+	// Enable run-time memory check for debug builds.
+#if defined(DEBUG) | defined(_DEBUG)
+	_CrtSetDbgFlag(_CRTDBG_ALLOC_MEM_DF | _CRTDBG_LEAK_CHECK_DF);
+#endif
+
 	HRESULT hr = CoInitializeEx(NULL, COINITBASE_MULTITHREADED);
 	if (FAILED(hr))
 		return 1;
@@ -319,7 +324,8 @@ HWND InitInstance(HINSTANCE hInstance, LPCWSTR lpszTitle, LPCWSTR lpszWindowClas
 		return NULL;
 	}
 
-	AppState.Init(hWnd);
+	if (!AppState.Init(hWnd))
+		return NULL;
 	if (AppState.fullScreen)
 		ToggleFullScreen(hWnd);
 

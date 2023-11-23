@@ -52,6 +52,7 @@ bool SnowParticle::Init(HWND hWnd, const XMFLOAT3& position, int numMax, float w
 
 	if (!m_shader.Init(hWnd)) {
 		MessageBox(hWnd, _T("SnowShader::Init() failed!"), _T("SnowParticle"), MB_ICONERROR | MB_OK);
+		return false;
 	}
 
 	return InitBuffers();

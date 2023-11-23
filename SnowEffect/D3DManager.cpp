@@ -30,7 +30,6 @@ public:
 		DXGI_MODE_DESC* displayModeList;
 		DXGI_ADAPTER_DESC adapterDesc;
 		DXGI_SWAP_CHAIN_DESC swapChainDesc;
-		D3D_FEATURE_LEVEL featureLevel;
 		ID3D11Texture2D* backBufferPtr;
 		D3D11_RASTERIZER_DESC rasterDesc;
 		D3D11_VIEWPORT viewport;
@@ -159,13 +158,29 @@ public:
 		swapChainDesc.Flags = 0;
 
 		// Set the feature level to DirectX 11.
-		featureLevel = D3D_FEATURE_LEVEL_11_0;
+		//D3D_FEATURE_LEVEL featureLevel = D3D_FEATURE_LEVEL_11_0;
+		D3D_FEATURE_LEVEL levels [] = {
+			/*D3D_FEATURE_LEVEL_9_1,
+			D3D_FEATURE_LEVEL_9_2,
+			D3D_FEATURE_LEVEL_9_3,
+			D3D_FEATURE_LEVEL_10_0,
+			D3D_FEATURE_LEVEL_10_1,*/
+			D3D_FEATURE_LEVEL_11_0,
+			D3D_FEATURE_LEVEL_11_1
+		};
+
+		// This flag adds support for surfaces with a color-channel ordering different
+		// from the API default. It is required for compatibility with Direct2D.
+		UINT deviceFlags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
+#if defined(DEBUG) || defined(_DEBUG)
+		deviceFlags |= D3D11_CREATE_DEVICE_DEBUG;
+#endif
 
 		D3D_DRIVER_TYPE driverType = D3D_DRIVER_TYPE_HARDWARE;
 		// Create the swap chain, Direct3D device, and Direct3D device context.
 		while (1) {
-			hr = D3D11CreateDeviceAndSwapChain(NULL, driverType, NULL, 0, &featureLevel, 1, D3D11_SDK_VERSION,
-				&swapChainDesc, &D3D::SwapChain, &D3D::Device, NULL, &D3D::DeviceContext);
+			hr = D3D11CreateDeviceAndSwapChain(NULL, driverType, NULL, deviceFlags, levels, ARRAYSIZE(levels),
+				D3D11_SDK_VERSION, &swapChainDesc, &D3D::SwapChain, &D3D::Device, NULL, &D3D::DeviceContext);
 			if (FAILED(hr)) {
 				if (hr == DXGI_ERROR_UNSUPPORTED && driverType == D3D_DRIVER_TYPE_HARDWARE) {
 					driverType = D3D_DRIVER_TYPE_REFERENCE;

@@ -17,10 +17,7 @@ struct app_state {
 		HDC hdc = GetDC(NULL);
 		dpi = GetDeviceCaps(hdc, LOGPIXELSY);
 		ReleaseDC(NULL, hdc);
-	}
 
-	bool Init(HWND hwnd) {
-		this->hWnd = hwnd;
 		GetModuleFileName(hInstance, strAppDir.GetBuffer(MAX_PATH), MAX_PATH);
 		strAppDir.ReleaseBuffer();
 		int nPos = strAppDir.ReverseFind('\\');
@@ -34,6 +31,10 @@ struct app_state {
 		show_imgui = ReadIniInt(_T("UserSettings"), _T("ShowImGui"), TRUE);
 		fullScreen = ReadIniInt(_T("UserSettings"), _T("FullScreen"), FALSE);
 		iSnowMax = ReadIniInt(_T("UserSettings"), _T("ParticleMax"), iSnowMax);
+	}
+
+	bool Init(HWND hwnd) {
+		this->hWnd = hwnd;
 
 		SetTitleBarDarkMode(this->hWnd, isDarkMode);
 		/*if (isDarkMode) {
@@ -48,7 +49,7 @@ struct app_state {
 		}
 
 		float zoom = -particle.GetViewSize().z - 2.5f;
-		str = ReadIniString(_T("UserSettings"), _T("Zoom"), 10);
+		CString str = ReadIniString(_T("UserSettings"), _T("Zoom"), 10);
 		if (!str.IsEmpty())
 			zoom = (float)_ttof(str);
 		camera.SetPosition(0.0f, 0.0f, zoom);
