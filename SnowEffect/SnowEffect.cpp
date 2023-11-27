@@ -5,6 +5,7 @@
 #include "SnowEffect.h"
 #include "resource.h"
 #include <commdlg.h>
+#include <windowsx.h>
 
 #pragma comment(lib, "dwmapi.lib")
 
@@ -17,7 +18,9 @@ static UINT		g_ResizeWidth = 0, g_ResizeHeight = 0;
 ATOM MyRegisterClass(HINSTANCE hInstance, LPCWSTR lpszWindowClass);
 HWND InitInstance(HINSTANCE hInstance, LPCWSTR lpszTitle, LPCWSTR lpszWindowClass);
 void ToggleFullScreen(HWND hWnd);
+BOOL BrowseBackImage(LPTSTR lpszFilePath, DWORD dwBuffLen = MAX_PATH);
 LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
+INT_PTR CALLBACK SettingsProc(HWND, UINT, WPARAM, LPARAM);
 INT_PTR CALLBACK About(HWND, UINT, WPARAM, LPARAM);
 
 static CStringA Utf8(LPCWSTR lpszUnicode)
@@ -28,6 +31,124 @@ static CStringA Utf8(LPCWSTR lpszUnicode)
 	WideCharToMultiByte(CP_UTF8, 0, lpszUnicode, wstr_len, szUtf8, nLen, NULL, NULL);
 	return szUtf8;
 }
+
+app_state::app_state() : hInstance(NULL), hWnd(NULL), hPreview(NULL), wndSize({1024, 1024}), backSize{0}, backAspect(0),
+						 isDarkMode(false), appMode(AppMode::Normal), spriteBatch(NULL), backTexture(NULL)
+{
+	pSettings = new AppSettings;
+	isDarkMode = !IsLightTheme();
+	if (isDarkMode)
+		pSettings->clear_color = ImVec4(0.15f, 0.15f, 0.15f, 1.0f);
+	HDC hdc = GetDC(NULL);
+	dpi = GetDeviceCaps(hdc, LOGPIXELSY);
+	ReleaseDC(NULL, hdc);
+}
+
+void app_state::Init(HINSTANCE hInst)
+{
+	this->hInstance = hInst;
+	int nRet = strTitle.LoadString(hInstance, IDS_APP_TITLE);
+	GetModuleFileName(hInstance, strAppDir.GetBuffer(MAX_PATH), MAX_PATH);
+	strAppDir.ReleaseBuffer();
+	int nPos = strAppDir.ReverseFind('\\');
+	strAppName = strAppDir.Mid(nPos + 1);
+	strAppDir.Delete(nPos + 1, strAppDir.GetLength() - nPos);
+	nPos = strAppName.ReverseFind('.');
+	CString str = strAppName.Mid(nPos + 1);
+	pSettings->isScreenSaver = (str.CompareNoCase(_T("scr")) == 0);
+	strAppName.Delete(nPos, strAppName.GetLength() - nPos + 1);
+	pSettings->strIniFilePath = strAppDir + strAppName + _T(".ini");
+	nPos = strAppName.ReverseFind('~');
+	if (nPos != -1) {
+		strAppName = strTitle;
+		strAppName.Remove(0x20);
+	}
+	pSettings->Load(strAppName, appMode);
+	if (__argc > 1) {
+		str = __targv[1];
+		if (str.GetLength() > 2)
+			str.Delete(2, str.GetLength() - 2);
+		if (str.CompareNoCase(_T("/s")) == 0) {
+			// Run the Screen Saver.
+			appMode = AppMode::ScreenSaver;
+		} else if (str.CompareNoCase(_T("/c")) == 0) {
+			// Show the Settings dialog box, modal to the foreground window.
+			appMode = AppMode::Settings;
+		} else if (str.CompareNoCase(_T("/p")) == 0) {
+			// Preview Screen Saver as child of window <HWND>.
+			appMode = AppMode::Preview;
+			if (__argc > 2) {
+				hPreview = (HWND)_ttoi(__targv[2]);
+				pSettings->iSnowMax = 500;
+				pSettings->show_imgui = false;
+			}
+		}
+	} else if (pSettings->isScreenSaver) {
+		appMode = AppMode::Settings;
+	}
+
+	//str.Format(_T("appMode: %d, argc: %d, argv[1]: %s"), (int)appMode, __argc, __argc > 1 ? __targv[1] : _T(""));
+	//MessageBox(NULL, str, _T("Debug"), MB_ICONINFORMATION);
+}
+
+bool app_state::InitResources(HWND hwnd)
+{
+	this->hWnd = hwnd;
+	SetTitleBarDarkMode(this->hWnd, isDarkMode);
+	/*if (isDarkMode) {
+	DWM_BLURBEHIND bb = { 0 };
+	bb.dwFlags = DWM_BB_ENABLE;
+	bb.fEnable = TRUE;
+	DwmEnableBlurBehindWindow(hWnd, &bb);
+	}*/
+	if (appMode == AppMode::Preview)
+		particle.SetSnowSize(0.1f);
+	if (!particle.Init(hWnd, XMFLOAT3(0, -5, 0), pSettings->iSnowMax, 5, 5, 5)) {
+		ATLTRACE("SnowParticle::Init() failed!\n");
+		return false;
+	}
+
+	camera.SetPosition(0.0f, 0.0f, pSettings->zoom);
+	//camera.SetRotation(0.0f, 1.0f, 1.0f);
+
+	this->spriteBatch = new SpriteBatch(D3D::DeviceContext);
+	if (!pSettings->strBackImgPath.IsEmpty())
+		SetBackImage(pSettings->strBackImgPath);
+	return true;
+}
+
+bool app_state::SetBackImage(LPCTSTR lpszImgPath)
+{
+	SafeRelease(&backTexture);
+	HRESULT hr = CreateWICTextureFromFileEx(D3D::Device, lpszImgPath, 0, D3D11_USAGE_DEFAULT,
+		D3D11_BIND_SHADER_RESOURCE, 0, 0, WIC_LOADER_IGNORE_SRGB, nullptr, &backTexture);
+	if (SUCCEEDED(hr)) {
+		ID3D11Resource* pResource = nullptr;
+		backTexture->GetResource(&pResource);
+		D3D11_TEXTURE2D_DESC desc;
+		((ID3D11Texture2D*)pResource)->GetDesc(&desc);
+		pResource->Release();
+		backSize.cx = desc.Width;
+		backSize.cy = desc.Height;
+		backAspect = (float)backSize.cx / backSize.cy;
+		pSettings->strBackImgPath = lpszImgPath;
+		return true;
+	}
+	pSettings->strBackImgPath.Empty();
+	return false;
+}
+
+void app_state::Cleanup(bool saveSettings)
+{
+	if (saveSettings) {
+		if (appMode != AppMode::Preview)
+			pSettings->Save();
+	}
+	SafeDelete(pSettings);
+	SafeDelete(spriteBatch);
+	SafeRelease(&backTexture);
+}
+
 
 int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInst, _In_ LPWSTR lpCmdLine, _In_ int nCmdShow)
 {
@@ -43,10 +164,15 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInst, _I
 	if (FAILED(hr))
 		return 1;
 
-    // Initialize global strings
-	AppState.strTitle.LoadString(hInstance, IDS_APP_TITLE);
+	AppState.Init(hInstance);
 	CString strWindowClass = AppState.strTitle + _T(" Window");
 	MyRegisterClass(hInstance, strWindowClass);
+
+	if (AppState.appMode == AppMode::Settings) {
+		int nResult = DialogBox(hInstance, MAKEINTRESOURCE(IDD_SETTINGS), NULL, SettingsProc);
+		AppState.Cleanup(nResult == IDOK);
+		return 0;
+	}
 
     // Perform application initialization:
 	HWND hWnd = InitInstance(hInstance, AppState.strTitle, strWindowClass);
@@ -62,9 +188,12 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInst, _I
 	ImGuiIO& io = ImGui::GetIO(); (void)io;
 	io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;   // Enable Keyboard Controls
 	io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;    // Enable Gamepad Controls
-	int nPos = AppState.strIniFilePath.ReverseFind('\\');
-	static CStringA strIniFilename = (LPCSTR)Utf8(AppState.strIniFilePath.Mid(nPos + 1));
-	io.IniFilename = (LPCSTR)strIniFilename;
+	int nPos = AppState.settings.strIniFilePath.ReverseFind('\\');
+	static CStringA strIniFilename = (LPCSTR)Utf8(AppState.settings.strIniFilePath.Mid(nPos + 1));
+	if (!AppState.settings.isScreenSaver)
+		io.IniFilename = (LPCSTR)strIniFilename;
+	else
+		io.IniFilename = NULL;
 	SetCurrentDirectory(AppState.strAppDir);
 
 	// Setup Dear ImGui style
@@ -73,12 +202,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInst, _I
 	else
 		ImGui::StyleColorsClassic();
 
-	CString strBackImgPath = AppState.ReadIniString(_T("UserSettings"), _T("ImagePath"));
-	strBackImgPath.ReleaseBuffer();
-	strBackImgPath.Trim();
-	if (strBackImgPath.IsEmpty())
-		strBackImgPath = AppState.strAppDir + AppState.strAppName + _T(".jpg");
-	AppState.SetBackImage(strBackImgPath);
+	AppState.SetBackImage(AppState.settings.strBackImgPath);
 
 	auto _ColorFromBytes = [](BYTE r, BYTE g, BYTE b) {
 		return ImVec4((float)r / 255.0f, (float)g / 255.0f, (float)b / 255.0f, 1.0f); };
@@ -128,7 +252,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInst, _I
 	CStringA strTitle = (LPCSTR)CT2A(AppState.strTitle);
 	strTitle += " Options";
 	HACCEL hAccelTable = LoadAccelerators(hInstance, MAKEINTRESOURCE(IDC_SNOWEFFECT));
-	if (!AppState.isScrnSaver)
+	if (!AppState.settings.isScreenSaver)
 		SetThreadExecutionState(ES_DISPLAY_REQUIRED | ES_SYSTEM_REQUIRED | ES_CONTINUOUS);
 
 	// Main loop
@@ -160,12 +284,12 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInst, _I
 		ImGui_ImplWin32_NewFrame();
 		ImGui::NewFrame();
 
-		if (AppState.show_imgui) {
+		if (AppState.settings.show_imgui) {
 			// 1. Show the big demo window (Most of the sample code is in ImGui::ShowDemoWindow()! You can browse its code to learn more about Dear ImGui!).
-			if (AppState.show_demo_window)
-				ImGui::ShowDemoWindow(&AppState.show_demo_window);
+			if (AppState.settings.show_demo_window)
+				ImGui::ShowDemoWindow(&AppState.settings.show_demo_window);
 
-			bool restore_cam_rot = AppState.show_another_window;
+			bool restore_cam_rot = AppState.settings.show_another_window;
 			// 2. Show a simple window that we create ourselves. We use a Begin/End pair to create a named window.
 			{
 				auto cam_pos = AppState.camera.GetPosition();
@@ -173,34 +297,28 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInst, _I
 				ImGui::Begin(strTitle);                          // Create a window called "Hello, world!" and append into it.
 
 				ImGui::Text("This is some useful text.");               // Display some text (you can use a format strings too)
-				ImGui::Checkbox("Demo Window", &AppState.show_demo_window);	// Edit bools storing our window open/close state
-				ImGui::Checkbox("Another Window", &AppState.show_another_window);
+				ImGui::Checkbox("Demo Window", &AppState.settings.show_demo_window);	// Edit bools storing our window open/close state
+				ImGui::Checkbox("Another Window", &AppState.settings.show_another_window);
 
 				ImGui::SliderFloat("Zoom", &cam_pos.z, -15.0f, 0.0f);
 				AppState.camera.SetPosition(cam_pos.x, cam_pos.y, cam_pos.z);
-				ImGui::ColorEdit3("clear color", (float*)&AppState.clear_color); // Edit 3 floats representing a color
+				AppState.settings.zoom = cam_pos.z;
+				ImGui::ColorEdit3("clear color", (float*)&AppState.settings.clear_color); // Edit 3 floats representing a color
 
 				if (ImGui::Button("Image")) {		// Buttons return true when clicked (most widgets return true when edited/activated)
 					TCHAR szFile[MAX_PATH] = { 0 };
-					OPENFILENAME ofn;
-					ZeroMemory(&ofn, sizeof(ofn));
-					ofn.lStructSize = sizeof(OPENFILENAME);
-					ofn.lpstrFilter = _T("Image files (*.jpg;*.jpeg;*.gif;*.png)\0*.jpg;*.jpeg;*.gif;*.png\0All files(*.*)\0*.*\0\0");
-					ofn.lpstrFile = szFile;
-					ofn.nMaxFile = MAX_PATH;
-					ofn.Flags = OFN_FILEMUSTEXIST;
-					if (::GetOpenFileName(&ofn)) {
+					if (BrowseBackImage(szFile)) {
 						AppState.SetBackImage(szFile);
 					}
 				}
-				if (!AppState.strBackImgPath.IsEmpty()) {
+				if (!AppState.settings.strBackImgPath.IsEmpty()) {
 					ImGui::SameLine();
 					CStringW strImgFile;
-					int nPos = AppState.strBackImgPath.ReverseFind('\\');
+					int nPos = AppState.settings.strBackImgPath.ReverseFind('\\');
 					if (nPos != -1)
-						strImgFile = AppState.strBackImgPath.Mid(nPos + 1);
+						strImgFile = AppState.settings.strBackImgPath.Mid(nPos + 1);
 					else
-						strImgFile = AppState.strBackImgPath;
+						strImgFile = AppState.settings.strBackImgPath;
 					ImGui::Text((LPCSTR)Utf8(strImgFile));
 				}
 				ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / io.Framerate, io.Framerate);
@@ -208,12 +326,12 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInst, _I
 			}
 
 			// 3. Show another simple window.
-			if (AppState.show_another_window)
+			if (AppState.settings.show_another_window)
 			{
-				ImGui::Begin("Another Window", &AppState.show_another_window);   // Pass a pointer to our bool variable (the window will have a closing button that will clear the bool when clicked)
+				ImGui::Begin("Another Window", &AppState.settings.show_another_window);   // Pass a pointer to our bool variable (the window will have a closing button that will clear the bool when clicked)
 				ImGui::Text("Hello from another window!");
 				if (ImGui::Button("Close Me")) {
-					AppState.show_another_window = false;
+					AppState.settings.show_another_window = false;
 				} else {
 					ImVec2 vMin = ImGui::GetWindowContentRegionMin();
 					ImVec2 vMax = ImGui::GetWindowContentRegionMax();
@@ -223,7 +341,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInst, _I
 				}
 				ImGui::End();
 			}
-			if (restore_cam_rot && !AppState.show_another_window) {
+			if (restore_cam_rot && !AppState.settings.show_another_window) {
 				auto rot = AppState.camera.GetRotation();
 				AppState.camera.SetRotation(-rot.x, 0.0f, -rot.z);
 			}
@@ -231,7 +349,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInst, _I
 
 		// Rendering
 		ImGui::Render();
-		const auto& clr = AppState.clear_color;
+		const auto& clr = AppState.settings.clear_color;
 		const float clear_color_with_alpha[4] = { clr.x * clr.w, clr.y * clr.w, clr.z * clr.w, clr.w };
 		//const float clear_color_with_alpha[4] = { 0, 0, 0, 1.0f };
 		D3D::BeginScene(clear_color_with_alpha);
@@ -244,7 +362,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInst, _I
 		Sleep(max(1, limitFrameRate - deltaTime));
 	}
 
-	if (!AppState.isScrnSaver)
+	if (!AppState.settings.isScreenSaver)
 		SetThreadExecutionState(ES_CONTINUOUS);
 
 	// Cleanup
@@ -252,7 +370,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInst, _I
 	ImGui_ImplWin32_Shutdown();
 	ImGui::DestroyContext();
 
-	AppState.Cleanup();
+	AppState.Cleanup(true);
 	D3D::Shutdown();
 	::DestroyWindow(hWnd);
 
@@ -294,8 +412,6 @@ ATOM MyRegisterClass(HINSTANCE hInstance, LPCWSTR lpszWindowClass)
 //
 HWND InitInstance(HINSTANCE hInstance, LPCWSTR lpszTitle, LPCWSTR lpszWindowClass)
 {
-	AppState.hInstance = hInstance; // Store instance handle in our global variable
-
 	DWORD dwStyle = WS_OVERLAPPEDWINDOW;
 	RECT rect = { 100, 100, 100 + AppState.wndSize.cx, 100 + AppState.wndSize.cy };
 	AdjustWindowRectExForDpi(&rect, dwStyle, FALSE, 0, AppState.dpi);
@@ -311,9 +427,21 @@ HWND InitInstance(HINSTANCE hInstance, LPCWSTR lpszTitle, LPCWSTR lpszWindowClas
 	cyWnd = rect.bottom - rect.top;
 	int x = (GetSystemMetrics(SM_CXFULLSCREEN) - cxWnd) / 2;
 	int y = (cyFullScrn - cyWnd) / 2;
+	HWND hWndParent = NULL;
+	if (AppState.appMode == AppMode::Preview && AppState.hPreview) {
+		hWndParent = AppState.hPreview;
+		if (GetWindowRect(hWndParent, &rect)) {
+			AppState.wndSize.cx = rect.right - rect.left;
+			AppState.wndSize.cy = rect.bottom - rect.top;
+			cxWnd = AppState.wndSize.cx;
+			cyWnd = AppState.wndSize.cy;
+			x = y = 0;
+			dwStyle = WS_CHILD | WS_VISIBLE;
+		}
+	}
 
 	HWND hWnd = CreateWindowW(lpszWindowClass, lpszTitle, dwStyle, x, y, cxWnd, cyWnd,
-							  nullptr, nullptr, hInstance, nullptr);
+							  hWndParent, nullptr, hInstance, nullptr);
 	if (!hWnd)
 		return NULL;
 
@@ -324,15 +452,25 @@ HWND InitInstance(HINSTANCE hInstance, LPCWSTR lpszTitle, LPCWSTR lpszWindowClas
 		return NULL;
 	}
 
-	if (!AppState.Init(hWnd))
+	if (!AppState.InitResources(hWnd))
 		return NULL;
-	if (AppState.fullScreen)
+	switch (AppState.appMode) {
+	case AppMode::Normal:
+		if (!AppState.settings.fullScreen)
+			break;
+		__fallthrough;
+	case AppMode::ScreenSaver:
 		ToggleFullScreen(hWnd);
-
+		break;
+	case AppMode::Preview:
+	case AppMode::Settings:
+		break;
+	}
 	return hWnd;
 }
 
-void ToggleFullScreen(HWND hWnd) {
+void ToggleFullScreen(HWND hWnd)
+{
 	static WINDOWPLACEMENT g_wpPrev = { sizeof(g_wpPrev) };
 	DWORD dwStyle = GetWindowLong(hWnd, GWL_STYLE);
 	if (dwStyle & WS_OVERLAPPEDWINDOW) {
@@ -344,15 +482,40 @@ void ToggleFullScreen(HWND hWnd) {
 			SetWindowPos(hWnd, HWND_TOP, mi.rcMonitor.left, mi.rcMonitor.top,
 				mi.rcMonitor.right - mi.rcMonitor.left, mi.rcMonitor.bottom - mi.rcMonitor.top,
 				SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
-			AppState.fullScreen = true;
+			AppState.settings.fullScreen = true;
 		}
 	} else {
 		SetWindowLong(hWnd, GWL_STYLE, dwStyle | WS_OVERLAPPEDWINDOW);
 		SetWindowPlacement(hWnd, &g_wpPrev);
 		SetWindowPos(hWnd, NULL, 0, 0, 0, 0,
 			SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
-		AppState.fullScreen = false;
+		AppState.settings.fullScreen = false;
 	}
+}
+
+BOOL BrowseBackImage(LPTSTR lpszFilePath, DWORD dwBuffLen)
+{
+	CString strCurDir;
+	GetCurrentDirectory(MAX_PATH, strCurDir.GetBuffer(MAX_PATH));
+	strCurDir.ReleaseBuffer();
+	OPENFILENAME ofn;
+	ZeroMemory(&ofn, sizeof(ofn));
+	ofn.lStructSize = sizeof(OPENFILENAME);
+	CString strInitialDir;
+	if (!AppState.settings.strBackImgPath.IsEmpty()) {
+		strInitialDir = AppState.settings.strBackImgPath;
+		int nPos = strInitialDir.ReverseFind('\\');
+		if (nPos != -1)
+			strInitialDir.Delete(nPos, strInitialDir.GetLength() - nPos);
+		ofn.lpstrInitialDir = strInitialDir;
+	}
+	ofn.lpstrFilter = _T("Image files(*.jpg;*.jpeg;*.gif;*.png)\0*.jpg;*.jpeg;*.gif;*.png\0All files(*.*)\0*.*\0\0");
+	ofn.lpstrFile = lpszFilePath;
+	ofn.nMaxFile = dwBuffLen;
+	ofn.Flags = OFN_FILEMUSTEXIST;
+	BOOL bRet = ::GetOpenFileName(&ofn);
+	SetCurrentDirectory(strCurDir);
+	return bRet;
 }
 
 
@@ -385,7 +548,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			g_ResizeWidth = (UINT)AppState.wndSize.cx; // Queue resize
 			g_ResizeHeight = (UINT)AppState.wndSize.cy;
 		}
-		return 0;
+		break;
 	/*case WM_PAINT:
 		{
 			PAINTSTRUCT ps;
@@ -397,15 +560,18 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		return FALSE;
 	case WM_KEYDOWN:
 		if (wParam == VK_RETURN) {
-			ToggleFullScreen(hWnd);
+			if (AppState.appMode != AppMode::ScreenSaver)
+				ToggleFullScreen(hWnd);
+			else
+				PostQuitMessage(0);
 		} else if (wParam == VK_ESCAPE) {
 			PostQuitMessage(0);
 		} else if (wParam == VK_F1) {
 			PostMessage(AppState.hWnd, WM_COMMAND, IDM_ABOUT, 0);
 		} else if (wParam == VK_F2) {
-			AppState.show_imgui = !AppState.show_imgui;
+			AppState.settings.show_imgui = !AppState.settings.show_imgui;
 		}
-		return 0;
+		break;
 	case WM_COMMAND:
         {
             int wmId = LOWORD(wParam);
@@ -427,10 +593,127 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		if ((wParam & 0xfff0) == SC_KEYMENU) // Disable ALT application menu
 			return 0;
 		break;*/
-    default:
+	case WM_MOUSEMOVE:
+		{
+			int xPos = GET_X_LPARAM(lParam);
+			int yPos = GET_Y_LPARAM(lParam);
+			if (AppState.appMode == AppMode::ScreenSaver && !AppState.settings.show_imgui) {
+				static POINT ptPrePos = { -999, -999 };
+				if (ptPrePos.x > -999) {
+					int xDelta = xPos - ptPrePos.x;
+					int yDelta = yPos - ptPrePos.y;
+					if (abs(xDelta) > 20 || abs(yDelta) > 20)
+						PostQuitMessage(0);
+				}
+				ptPrePos = { xPos, yPos };
+			}
+		}
+		break;
+	default:
         return DefWindowProc(hWnd, message, wParam, lParam);
     }
     return 0;
+}
+
+void CenterDialog(HWND hDlg)
+{
+	HWND hwndOwner;
+	RECT rc, rcDlg, rcOwner;
+
+	// Get the owner window and dialog box rectangles. 
+	if ((hwndOwner = GetParent(hDlg)) == NULL) 
+		hwndOwner = GetDesktopWindow(); 
+
+	GetWindowRect(hwndOwner, &rcOwner); 
+	GetWindowRect(hDlg, &rcDlg); 
+	CopyRect(&rc, &rcOwner); 
+
+	// Offset the owner and dialog box rectangles so that right and bottom 
+	// values represent the width and height, and then offset the owner again 
+	// to discard space taken up by the dialog box. 
+	OffsetRect(&rcDlg, -rcDlg.left, -rcDlg.top); 
+	OffsetRect(&rc, -rc.left, -rc.top); 
+	OffsetRect(&rc, -rcDlg.right, -rcDlg.bottom); 
+
+	// The new position is the sum of half the remaining space and the owner's 
+	// original position.
+	SetWindowPos(hDlg, HWND_TOP, rcOwner.left + (rc.right / 2), rcOwner.top + (rc.bottom / 2), 0, 0, SWP_NOSIZE);
+}
+
+INT_PTR CALLBACK SettingsProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
+{
+	UNREFERENCED_PARAMETER(lParam);
+	DWORD dwPos;
+	HWND hwndTrack;
+	CString str;
+
+	switch (message) {
+	case WM_INITDIALOG:
+		{
+			//AppState.SetTitleBarDarkMode(hDlg, AppState.isDarkMode);
+			HICON hIcon = LoadIcon(AppState.hInstance, MAKEINTRESOURCE(IDI_SNOWEFFECT));
+			SendMessage(hDlg, WM_SETICON, ICON_SMALL, (LPARAM)hIcon);
+			CenterDialog(hDlg);
+			SetDlgItemInt(hDlg, IDC_EDIT_PARTICLE_MAX, AppState.settings.iSnowMax, FALSE);
+			SendMessage(GetDlgItem(hDlg, IDC_SPIN1), UDM_SETRANGE, 0, MAKELPARAM(5000, 100));
+			str.Format(_T("%.2f"), AppState.settings.zoom);
+			SetDlgItemText(hDlg, IDC_EDIT_ZOOM, str);
+			HWND hSlider = GetDlgItem(hDlg, IDC_SLIDER1);
+			SendMessage(hSlider, TBM_SETRANGE, FALSE, MAKELPARAM(0, 15));
+			SendMessage(hSlider, TBM_SETPOS, TRUE, (LPARAM)(AppState.settings.zoom + 15.0f));
+			Button_SetCheck(GetDlgItem(hDlg, IDC_CHECK_SHOW_IMGUI), AppState.settings.show_imgui ? BST_CHECKED : BST_UNCHECKED);
+			SetDlgItemText(hDlg, IDC_EDIT_IMAGE_PATH, AppState.settings.strBackImgPath);
+		}
+		return (INT_PTR)TRUE;
+	case WM_CTLCOLORSTATIC:
+		{
+			HDC hdcStatic = (HDC)wParam;
+			switch (GetDlgCtrlID((HWND)lParam)) {
+			case IDC_EDIT_ZOOM:
+			case IDC_EDIT_IMAGE_PATH:
+				SetTextColor(hdcStatic, GetSysColor(COLOR_WINDOWTEXT));
+				SetBkColor(hdcStatic, GetSysColor(COLOR_WINDOW));
+				return (INT_PTR)GetStockObject(WHITE_BRUSH);
+			}
+			return DefWindowProc(hDlg, message, wParam, lParam);
+		}
+	case WM_COMMAND:
+		switch (LOWORD(wParam)) {
+		case IDOK:
+			AppState.settings.iSnowMax = GetDlgItemInt(hDlg, IDC_EDIT_PARTICLE_MAX, NULL, FALSE);
+			AppState.settings.show_imgui = Button_GetCheck(GetDlgItem(hDlg, IDC_CHECK_SHOW_IMGUI));
+			GetDlgItemText(hDlg, IDC_EDIT_IMAGE_PATH, AppState.settings.strBackImgPath.GetBuffer(MAX_PATH), MAX_PATH);
+			AppState.settings.strBackImgPath.ReleaseBuffer();
+			__fallthrough;
+		case IDCANCEL:
+			EndDialog(hDlg, LOWORD(wParam));
+			return (INT_PTR)TRUE;
+		case IDC_BTN_BROWSE:
+			{
+				TCHAR szFile[MAX_PATH] = { 0 };
+				if (BrowseBackImage(szFile)) {
+					SetDlgItemText(hDlg, IDC_EDIT_IMAGE_PATH, szFile);
+				}
+			}
+			return (INT_PTR)TRUE;
+		}
+		break;
+	case WM_HSCROLL:
+		hwndTrack = (HWND)lParam;
+		switch (LOWORD(wParam)) { 
+		case TB_THUMBTRACK:
+		case TB_ENDTRACK:
+			dwPos = SendMessage(hwndTrack, TBM_GETPOS, 0, 0);
+			AppState.settings.zoom = dwPos - 15.0f;
+			str.Format(_T("%.2f"), AppState.settings.zoom);
+			SetDlgItemText(hDlg, IDC_EDIT_ZOOM, str);
+			break;
+		default:
+			break;
+		}
+		break;
+	}
+	return (INT_PTR)FALSE;
 }
 
 // Message handler for about box.
@@ -440,34 +723,9 @@ INT_PTR CALLBACK About(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
 
     switch (message) {
     case WM_INITDIALOG:
-		{
-			HWND hwndOwner;
-			RECT rc, rcDlg, rcOwner;
-
-			// Get the owner window and dialog box rectangles. 
-			if ((hwndOwner = GetParent(hDlg)) == NULL) 
-				hwndOwner = GetDesktopWindow(); 
-
-			GetWindowRect(hwndOwner, &rcOwner); 
-			GetWindowRect(hDlg, &rcDlg); 
-			CopyRect(&rc, &rcOwner); 
-
-			// Offset the owner and dialog box rectangles so that right and bottom 
-			// values represent the width and height, and then offset the owner again 
-			// to discard space taken up by the dialog box. 
-
-			OffsetRect(&rcDlg, -rcDlg.left, -rcDlg.top); 
-			OffsetRect(&rc, -rc.left, -rc.top); 
-			OffsetRect(&rc, -rcDlg.right, -rcDlg.bottom); 
-
-			// The new position is the sum of half the remaining space and the owner's 
-			// original position. 
-
-			SetWindowPos(hDlg, HWND_TOP,
-				rcOwner.left + (rc.right / 2), rcOwner.top + (rc.bottom / 2), 0, 0, SWP_NOSIZE); 
-		}
-        return (INT_PTR)TRUE;
-
+		//AppState.SetTitleBarDarkMode(hDlg, AppState.isDarkMode);
+		CenterDialog(hDlg);
+		return (INT_PTR)TRUE;
     case WM_COMMAND:
         if (LOWORD(wParam) == IDOK || LOWORD(wParam) == IDCANCEL) {
             EndDialog(hDlg, LOWORD(wParam));

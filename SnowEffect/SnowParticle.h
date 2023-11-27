@@ -78,6 +78,7 @@ public:
 	bool RenderShader(XMMATRIX& worldMatrix, XMMATRIX& viewMatrix, XMMATRIX& projectionMatrix) noexcept;
 
 	inline XMFLOAT3& GetViewSize() { return m_size; }
+	inline void SetSnowSize(float snowSize) { m_snowSize = snowSize; }
 
 protected:
 	bool InitBuffers() noexcept;
