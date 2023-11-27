@@ -400,6 +400,22 @@ ATOM MyRegisterClass(HINSTANCE hInstance, LPCWSTR lpszWindowClass)
     return RegisterClassExW(&wcex);
 }
 
+using AdjustWindowRectExForDpi_fn = BOOL(WINAPI *)(LPRECT, DWORD, BOOL, DWORD, UINT);
+
+BOOL CalcWindowRectForDpi(LPRECT lpRect, DWORD  dwStyle, BOOL bMenu, DWORD dwExStyle, UINT dpi, UINT nAdjustType = 0)
+{
+	if (nAdjustType == 0)
+		dwExStyle &= ~WS_EX_CLIENTEDGE;
+
+	HMODULE hModule = ::LoadLibrary(_T("User32.dll")); // don't call FreeLibrary() with this handle; the module was already loaded up, it would break the app
+	if (hModule) {
+		AdjustWindowRectExForDpi_fn addr = (AdjustWindowRectExForDpi_fn)::GetProcAddress(hModule, "AdjustWindowRectExForDpi");
+		if (addr)
+			return addr(lpRect, dwStyle, bMenu, dwExStyle, dpi);
+	}
+	return ::AdjustWindowRectEx(lpRect, dwStyle, bMenu, dwExStyle);
+}
+
 //
 //   FUNCTION: InitInstance(HINSTANCE, int)
 //
@@ -414,7 +430,8 @@ HWND InitInstance(HINSTANCE hInstance, LPCWSTR lpszTitle, LPCWSTR lpszWindowClas
 {
 	DWORD dwStyle = WS_OVERLAPPEDWINDOW;
 	RECT rect = { 100, 100, 100 + AppState.wndSize.cx, 100 + AppState.wndSize.cy };
-	AdjustWindowRectExForDpi(&rect, dwStyle, FALSE, 0, AppState.dpi);
+	//AdjustWindowRectExForDpi(&rect, dwStyle, FALSE, 0, AppState.dpi);
+	CalcWindowRectForDpi(&rect, dwStyle, FALSE, 0, AppState.dpi);
 	int cxWnd, cyWnd = rect.bottom - rect.top;
 	int cyFullScrn = GetSystemMetrics(SM_CYFULLSCREEN);
 	if (cyWnd > cyFullScrn) {
