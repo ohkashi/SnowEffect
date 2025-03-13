@@ -14,19 +14,46 @@ XMMATRIX				D3D::ProjectionMatrix;
 XMMATRIX				D3D::WorldMatrix;
 XMMATRIX				D3D::OrthoMatrix;
 
+#ifdef _DEBUG
+#include <dxgidebug.h>
+#pragma comment(lib, "dxguid.lib")
+void _ReportLiveObjects()
+{
+	HMODULE dxgidebugdll = GetModuleHandleW(L"dxgidebug.dll");
+	decltype(auto) GetDebugInterface =
+		reinterpret_cast<decltype(&DXGIGetDebugInterface)>(GetProcAddress(dxgidebugdll, "DXGIGetDebugInterface"));
+
+	IDXGIDebug* debug;
+
+	GetDebugInterface(IID_PPV_ARGS(&debug));
+
+	const wchar_t* wszLine = L"==================================================================================="
+		L"==============================================\r\n";
+	OutputDebugStringW(wszLine);
+	debug->ReportLiveObjects(DXGI_DEBUG_D3D11, DXGI_DEBUG_RLO_DETAIL);
+	OutputDebugStringW(wszLine);
+	debug->Release();
+}
+#endif
+
 class D3DManager
 {
 public:
-	D3DManager() : m_vsync_enabled(true), m_videoCardMemory(0), m_videoCardDescription{0}, m_renderTargetView(NULL),
-				   m_scrnNear(0), m_scrnDepth(0), m_depthStencilBuffer(NULL), m_depthStencilState(NULL), m_depthStencilView(NULL),
+	D3DManager() : m_vsync_enabled(true), m_videoCardMemory(0), m_videoCardDescription{0},
+				   m_renderTargetView(NULL), m_scrnNear(0), m_scrnDepth(0), m_depthStencilView(NULL),
 				   m_rasterState(NULL), m_alphaEnableBlendingState(NULL), m_alphaDisableBlendingState(NULL)	{}
-	~D3DManager() {}
+	~D3DManager() {
+#ifdef _DEBUG
+		_ReportLiveObjects();
+#endif
+	}
 
 	bool Initialize(HWND hwnd, int cxScreen, int cyScreen, bool vsync, bool fullscreen, float screenDepth, float screenNear) {
 		IDXGIFactory* factory;
 		IDXGIAdapter* adapter;
 		IDXGIOutput* adapterOutput;
-		unsigned int numModes = 0, numerator = 0, denominator = 1, stringLength = 0;
+		unsigned int numModes = 0, numerator = 0, denominator = 1;
+		size_t stringLength = 0;
 		DXGI_MODE_DESC* displayModeList;
 		DXGI_ADAPTER_DESC adapterDesc;
 		DXGI_SWAP_CHAIN_DESC swapChainDesc;
@@ -202,8 +229,7 @@ public:
 			return false;
 
 		// Release pointer to the back buffer as we no longer need it.
-		backBufferPtr->Release();
-		backBufferPtr = nullptr;
+		SafeRelease(&backBufferPtr);
 
 		hr = CreateDepthStencilView(cxScreen, cyScreen);
 		if (FAILED(hr))
@@ -291,8 +317,6 @@ public:
 		SafeRelease(&m_alphaDisableBlendingState);
 		SafeRelease(&m_rasterState);
 		SafeRelease(&m_depthStencilView);
-		SafeRelease(&m_depthStencilState);
-		SafeRelease(&m_depthStencilBuffer);
 		SafeRelease(&m_renderTargetView);
 		SafeRelease(&D3D::DeviceContext);
 		SafeRelease(&D3D::Device);
@@ -400,7 +424,8 @@ protected:
 		depthBufferDesc.MiscFlags = 0;
 
 		// Create the texture for the depth buffer using the filled out description.
-		HRESULT hr = D3D::Device->CreateTexture2D(&depthBufferDesc, NULL, &m_depthStencilBuffer);
+		ID3D11Texture2D* pDepthStencilBuffer = nullptr;
+		HRESULT hr = D3D::Device->CreateTexture2D(&depthBufferDesc, NULL, &pDepthStencilBuffer);
 		while (SUCCEEDED(hr)) {
 			// Initialize the description of the stencil state.
 			D3D11_DEPTH_STENCIL_DESC depthStencilDesc;
@@ -428,12 +453,14 @@ protected:
 			depthStencilDesc.BackFace.StencilFunc = D3D11_COMPARISON_ALWAYS;
 
 			// Create the depth stencil state.
-			hr = D3D::Device->CreateDepthStencilState(&depthStencilDesc, &m_depthStencilState);
+			ID3D11DepthStencilState* pDepthStencilState = nullptr;
+			hr = D3D::Device->CreateDepthStencilState(&depthStencilDesc, &pDepthStencilState);
 			if (FAILED(hr))
 				break;
 
 			// Set the depth stencil state.
-			D3D::DeviceContext->OMSetDepthStencilState(m_depthStencilState, 1);
+			D3D::DeviceContext->OMSetDepthStencilState(pDepthStencilState, 1);
+			SafeRelease(&pDepthStencilState);
 
 			// Initialize the depth stencil view.
 			D3D11_DEPTH_STENCIL_VIEW_DESC depthStencilViewDesc;
@@ -445,7 +472,7 @@ protected:
 			depthStencilViewDesc.Texture2D.MipSlice = 0;
 
 			// Create the depth stencil view.
-			hr = D3D::Device->CreateDepthStencilView(m_depthStencilBuffer, &depthStencilViewDesc, &m_depthStencilView);
+			hr = D3D::Device->CreateDepthStencilView(pDepthStencilBuffer, &depthStencilViewDesc, &m_depthStencilView);
 			if (FAILED(hr))
 				break;
 
@@ -453,6 +480,7 @@ protected:
 			D3D::DeviceContext->OMSetRenderTargets(1, &m_renderTargetView, m_depthStencilView);
 			break;
 		}
+		SafeRelease(&pDepthStencilBuffer);
 		return hr;
 	}
 
@@ -467,8 +495,6 @@ private:
 	char	m_videoCardDescription[128];
 	float	m_scrnNear, m_scrnDepth;
 	ID3D11RenderTargetView*	m_renderTargetView;
-	ID3D11Texture2D*		m_depthStencilBuffer;
-	ID3D11DepthStencilState* m_depthStencilState;
 	ID3D11DepthStencilView*	m_depthStencilView;
 	ID3D11RasterizerState*	m_rasterState;
 	ID3D11BlendState*		m_alphaEnableBlendingState;

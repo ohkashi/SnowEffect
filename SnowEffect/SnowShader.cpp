@@ -9,6 +9,7 @@ SnowShader::SnowShader() : m_vertexShader(NULL), m_pixelShader(NULL), m_layout(N
 
 SnowShader::~SnowShader()
 {
+	Shutdown();
 }
 
 bool SnowShader::Init(HWND hWnd)
@@ -83,8 +84,6 @@ void SnowShader::Shutdown()
 {
 	// Shutdown the vertex and pixel shaders as well as the related objects.
 	ShutdownShader();
-
-	return;
 }
 
 bool SnowShader::Render(int indexCount, XMMATRIX worldMatrix, XMMATRIX viewMatrix, 

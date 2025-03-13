@@ -211,7 +211,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInst, _I
 	auto& style = ImGui::GetStyle();
 	style.AntiAliasedLines = true;
 	style.AntiAliasedFill = true;
-	float defaultRounding = (float)MulDiv(7, AppState.dpi, 96);
+	float defaultRounding = (float)MulDiv(6, AppState.dpi, 96);
 	style.WindowRounding = defaultRounding;
 	style.ChildRounding = defaultRounding;
 	style.FrameRounding = defaultRounding;

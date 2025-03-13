@@ -20,6 +20,7 @@ SnowParticle::~SnowParticle()
 {
 	Cleanup();
 	FreeBuffers();
+	SafeRelease(&m_pTexture);
 }
 
 bool SnowParticle::Init(HWND hWnd, const XMFLOAT3& position, int numMax, float w, float h, float d) noexcept
@@ -149,16 +150,10 @@ bool SnowParticle::InitBuffers() noexcept
 void SnowParticle::FreeBuffers() noexcept
 {
 	// Release the index buffer.
-	if (m_indexBuffer) {
-		m_indexBuffer->Release();
-		m_indexBuffer = nullptr;
-	}
+	SafeRelease(&m_indexBuffer);
 
 	// Release the vertex buffer.
-	if (m_vertexBuffer) {
-		m_vertexBuffer->Release();
-		m_vertexBuffer = nullptr;
-	}
+	SafeRelease(&m_vertexBuffer);
 
 	delete[] m_vertices;
 	m_vertices = nullptr;
